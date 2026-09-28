@@ -1295,6 +1295,43 @@
       document.getElementById('hiddenSubject').value =
         `🔔 Réservation Vision 24 — ${prenom} ${nom} — Acompte ${fmt(acompte)} — Événement ${dateEv}`;
 
+      // 🔗 Copie vers le CRM (Prospects) — ce tunnel panier/checkout construit ses
+      //    propres champs (formState) à la volée et ne déclenche jamais l'événement
+      //    "submit" natif du form, donc le bridge global (vision24-crm-intake.js)
+      //    ne peut pas l'intercepter tout seul. On envoie ici directement, en
+      //    parallèle de l'email FormSubmit, sans changer le comportement existant.
+      try {
+        const options = [];
+        let invites = null, duree = '', typeEvt = '';
+        cart.forEach(x => {
+          const p = getItem(x);
+          if (x.type !== 'pack' || !p.questions) return;
+          p.questions.forEach(q => {
+            const val = String(formState[`pack_${x.key}_${q.key}`] || '').trim();
+            if (!val) return;
+            if (q.key === 'invites' && !invites) invites = val;
+            else if (q.key === 'duree' && !duree) duree = val + ' h';
+            else if ((q.key === 'typeEvt' || q.key === 'ceremonie') && !typeEvt) typeEvt = val;
+            options.push(`${p.name} · ${q.label} : ${val}`);
+          });
+        });
+        const crmPayload = {
+          prenom, nom, email, tel,
+          typeClient: typeCl,
+          typeEvenement: typeEvt,
+          dateEvenement: dateEv,
+          lieuEvenement: lieu,
+          nbPersonnes: invites,
+          duree,
+          message: msgLibre,
+          services: cart.map(x => getItem(x).name),
+          options,
+          budget: total,
+          pageOrigine: 'presentation/panier',
+        };
+        if (window.Vision24CRM) window.Vision24CRM.send(crmPayload);
+      } catch (_) {}
+
       // Envoi via fetch pour éviter le redirect formsubmit
       // On construit un FormData manuellement à partir du formState pour inclure tous les champs
       const fd = new FormData();
@@ -1400,6 +1437,6 @@
   });
 </script>
 
-<script src="assets/js/vision24-crm-intake.js" defer></script>
+<script src="assets/js/vision24-crm-intake.js?v=2" defer></script>
 </body>
 </html>
