@@ -808,13 +808,17 @@
       btn.innerHTML = 'Envoi en cours…';
 
       try {
-        const fd = new FormData(form);
-        const res = await fetch(form.action, {
-          method: 'POST',
-          body: fd,
-          headers: { 'Accept': 'application/json' }
-        });
-        if (!res.ok) throw new Error('Erreur serveur');
+        // Envoi via le serveur Vision 24 (e-mail + CRM) : le script CRM a pris
+        // la demande en charge au clic, on attend sa confirmation.
+        const crm = window.Vision24CRM;
+        let ok = false;
+        if (crm && crm.lastId) {
+          ok = await crm.whenDelivered(crm.lastId, 15000);
+        } else {
+          const res = await fetch(form.action, { method: 'POST', body: new FormData(form), headers: { 'Accept': 'application/json' } });
+          ok = res.ok;
+        }
+        if (!ok) throw new Error('Envoi non confirmé');
         form.style.display = 'none';
         success.removeAttribute('hidden');
         success.style.display = 'block';
@@ -1300,6 +1304,7 @@
       //    "submit" natif du form, donc le bridge global (vision24-crm-intake.js)
       //    ne peut pas l'intercepter tout seul. On envoie ici directement, en
       //    parallèle de l'email FormSubmit, sans changer le comportement existant.
+      let crmId = null;
       try {
         const options = [];
         let invites = null, duree = '', typeEvt = '';
@@ -1329,8 +1334,23 @@
           budget: total,
           pageOrigine: 'presentation/panier',
         };
-        if (window.Vision24CRM) window.Vision24CRM.send(crmPayload);
+        if (window.Vision24CRM) crmId = window.Vision24CRM.send(crmPayload);
       } catch (_) {}
+
+      const done = () => {
+        form.style.display = 'none';
+        success.style.display = 'block';
+        // Vider le panier
+        cart = []; save(); render();
+      };
+      // ✉️ Envoi via le serveur Vision 24 (e-mail + CRM) : plus de dépendance à FormSubmit
+      if (crmId) {
+        window.Vision24CRM.whenDelivered(crmId, 15000).then(ok => {
+          if (ok) done();
+          else alert('Erreur d\'envoi. Merci de réessayer ou de nous contacter directement à ap.vision24@outlook.fr');
+        });
+        return;
+      }
 
       // Envoi via fetch pour éviter le redirect formsubmit
       // On construit un FormData manuellement à partir du formState pour inclure tous les champs
@@ -1345,12 +1365,7 @@
         fd.append(el.name, el.value);
       });
       fetch(form.action, { method: 'POST', body: fd, headers: { 'Accept': 'application/json' } })
-        .then(() => {
-          form.style.display = 'none';
-          success.style.display = 'block';
-          // Vider le panier
-          cart = []; save(); render();
-        })
+        .then(done)
         .catch(() => {
           alert('Erreur d\'envoi. Merci de réessayer ou de nous contacter directement à ap.vision24@outlook.fr');
         });
@@ -1437,6 +1452,6 @@
   });
 </script>
 
-<script src="assets/js/vision24-crm-intake.js?v=2" defer></script>
+<script src="assets/js/vision24-crm-intake.js?v=3" defer></script>
 </body>
 </html>
