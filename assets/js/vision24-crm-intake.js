@@ -22,7 +22,6 @@
   var MAX_ATTEMPTS = 10;
   var FORMSUBMIT_META = ['_subject', '_captcha', '_template', '_next', '_autoresponse', '_cc', '_url'];
   var inFlight = {};
-  var waiters = {};   // id → callbacks à prévenir quand la demande est bien reçue
 
   function uuid() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '');
@@ -92,11 +91,7 @@
       writeOutbox(readOutbox().map(function (e) { return e.id === entry.id ? entry : e; }));
       post(entry).then(function (done) {
         delete inFlight[entry.id];
-        if (done) {
-          removeFromOutbox(entry.id);
-          (waiters[entry.id] || []).forEach(function (cb) { cb(true); });
-          delete waiters[entry.id];
-        }
+        if (done) removeFromOutbox(entry.id);
       });
     });
   }
@@ -112,7 +107,6 @@
     var list = readOutbox();
     list.push({ id: id, createdAt: Date.now(), attempts: 0, data: payload });
     writeOutbox(list);
-    if (window.Vision24CRM) window.Vision24CRM.lastId = id;
     flush();
     return id;
   }
@@ -174,17 +168,7 @@
     for (var i = 0; i < forms.length; i++) if (looksLikeDevisForm(forms[i])) attach(forms[i]);
   }
 
-  /** Promesse : true dès que le serveur a bien reçu la demande `id`
-   *  (false si pas de confirmation dans le délai — l'envoi continue en arrière-plan). */
-  function whenDelivered(id, timeoutMs) {
-    return new Promise(function (resolve) {
-      if (!readOutbox().some(function (e) { return e.id === id; }) && !inFlight[id]) return resolve(true);
-      (waiters[id] = waiters[id] || []).push(resolve);
-      setTimeout(function () { resolve(false); }, timeoutMs || 15000);
-    });
-  }
-
-  window.Vision24CRM = { send: send, flush: flush, whenDelivered: whenDelivered, lastId: null };
+  window.Vision24CRM = { send: send, flush: flush };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () { scanForms(); flush(); });
