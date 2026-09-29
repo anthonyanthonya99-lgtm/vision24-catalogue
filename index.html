@@ -795,6 +795,15 @@
     const btn = form.querySelector('button[type="submit"]');
     const originalLabel = btn ? btn.innerHTML : '';
 
+    const showOk = () => {
+      form.style.display = 'none';
+      success.removeAttribute('hidden');
+      success.style.display = 'block';
+      success.classList.add('is-shown');
+      success.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      form.reset();
+    };
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       // Honeypot anti-spam
@@ -815,13 +824,11 @@
           headers: { 'Accept': 'application/json' }
         });
         if (!res.ok) throw new Error('Erreur serveur');
-        form.style.display = 'none';
-        success.removeAttribute('hidden');
-        success.style.display = 'block';
-        success.classList.add('is-shown');
-        success.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        form.reset();
+        showOk();
       } catch (err) {
+        // FormSubmit indisponible : e-mail de secours envoyé par le serveur Vision 24
+        const crm = window.Vision24CRM;
+        if (crm && crm.lastId && (await crm.emailFallback(crm.lastId))) { showOk(); return; }
         alert("L'envoi a échoué. Vérifiez votre connexion et réessayez, ou contactez-nous directement à ap.vision24@outlook.fr");
         btn.disabled = false;
         btn.style.opacity = 1;
@@ -1300,6 +1307,7 @@
       //    "submit" natif du form, donc le bridge global (vision24-crm-intake.js)
       //    ne peut pas l'intercepter tout seul. On envoie ici directement, en
       //    parallèle de l'email FormSubmit, sans changer le comportement existant.
+      let crmId = null;
       try {
         const options = [];
         let invites = null, duree = '', typeEvt = '';
@@ -1329,7 +1337,7 @@
           budget: total,
           pageOrigine: 'presentation/panier',
         };
-        if (window.Vision24CRM) window.Vision24CRM.send(crmPayload);
+        if (window.Vision24CRM) crmId = window.Vision24CRM.send(crmPayload);
       } catch (_) {}
 
       // Envoi via fetch pour éviter le redirect formsubmit
@@ -1351,7 +1359,14 @@
           // Vider le panier
           cart = []; save(); render();
         })
-        .catch(() => {
+        .catch(async () => {
+          // FormSubmit indisponible : e-mail de secours envoyé par le serveur Vision 24
+          if (crmId && window.Vision24CRM && (await window.Vision24CRM.emailFallback(crmId))) {
+            form.style.display = 'none';
+            success.style.display = 'block';
+            cart = []; save(); render();
+            return;
+          }
           alert('Erreur d\'envoi. Merci de réessayer ou de nous contacter directement à ap.vision24@outlook.fr');
         });
     }
@@ -1437,6 +1452,6 @@
   });
 </script>
 
-<script src="assets/js/vision24-crm-intake.js?v=2" defer></script>
+<script src="assets/js/vision24-crm-intake.js?v=4" defer></script>
 </body>
 </html>

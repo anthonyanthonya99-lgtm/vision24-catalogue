@@ -22,6 +22,7 @@
   var MAX_ATTEMPTS = 10;
   var FORMSUBMIT_META = ['_subject', '_captcha', '_template', '_next', '_autoresponse', '_cc', '_url'];
   var inFlight = {};
+  var waiters = {};   // id → callbacks prévenus quand la demande est bien reçue
 
   function uuid() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, '');
@@ -91,7 +92,11 @@
       writeOutbox(readOutbox().map(function (e) { return e.id === entry.id ? entry : e; }));
       post(entry).then(function (done) {
         delete inFlight[entry.id];
-        if (done) removeFromOutbox(entry.id);
+        if (done) {
+          removeFromOutbox(entry.id);
+          (waiters[entry.id] || []).forEach(function (cb) { cb(true); });
+          delete waiters[entry.id];
+        }
       });
     });
   }
@@ -107,6 +112,7 @@
     var list = readOutbox();
     list.push({ id: id, createdAt: Date.now(), attempts: 0, data: payload });
     writeOutbox(list);
+    if (window.Vision24CRM) window.Vision24CRM.lastId = id;
     flush();
     return id;
   }
@@ -168,7 +174,32 @@
     for (var i = 0; i < forms.length; i++) if (looksLikeDevisForm(forms[i])) attach(forms[i]);
   }
 
-  window.Vision24CRM = { send: send, flush: flush };
+  /** Promesse : true dès que le serveur a bien reçu la demande `id`. */
+  function whenDelivered(id, timeoutMs) {
+    return new Promise(function (resolve) {
+      if (!readOutbox().some(function (e) { return e.id === id; }) && !inFlight[id]) return resolve(true);
+      (waiters[id] = waiters[id] || []).push(resolve);
+      setTimeout(function () { resolve(false); }, timeoutMs || 15000);
+    });
+  }
+
+  /** E-MAIL DE SECOURS — utilisé UNIQUEMENT si FormSubmit échoue :
+   *  une fois la demande enregistrée, le serveur Vision 24 envoie l'e-mail. */
+  function emailFallback(id) {
+    if (!id) return Promise.resolve(false);
+    return whenDelivered(id, 15000).then(function (ok) {
+      if (!ok) return false;
+      return fetch(API_URL.replace('submit.php', 'notify.php'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+        body: JSON.stringify({ externalId: id })
+      }).then(function (r) { return r.json(); })
+        .then(function (d) { return !!(d && d.ok); })
+        .catch(function () { return false; });
+    });
+  }
+
+  window.Vision24CRM = { send: send, flush: flush, whenDelivered: whenDelivered, emailFallback: emailFallback, lastId: null };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () { scanForms(); flush(); });
